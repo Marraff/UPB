@@ -1,5 +1,9 @@
 from flask import Flask, Response, request, jsonify
 from flask_sqlalchemy import SQLAlchemy
+from Crypto.PublicKey import RSA
+from Crypto.Cipher import AES, PKCS1_OAEP
+from Crypto.Random import get_random_bytes
+
 app = Flask(__name__)
 
 app.config['SQLALCHEMY_DATABASE_URI'] = 'sqlite:///data.db'
@@ -37,12 +41,37 @@ with app.app_context():
 '''
 @app.route('/api/gen/<user>', methods=['GET'])
 def generate_keypair(user):
-    '''
-        TODO: implementovat
-    '''
+    # Step 1: Generate a new RSA key pair (2048 bits)
+    key = RSA.generate(2048)
 
-    return Response(b'\xff', content_type='application/octet-stream')
+    # Step 2: Extract the private and public keys
+    private_key = key.export_key()  # Private key in PEM format (binary)
+    public_key = key.publickey().export_key()  # Public key in PEM format (binary)
 
+    # Step 3: Store the public key in the database for the user
+    user_record = User(username=user, public_key=public_key.decode('utf-8'))  # Create new user record
+    db.session.add(user_record)  # Add user to session
+    db.session.commit()  # Commit to assign an ID to the user
+
+    # Step 4: Return the private key as a binary response
+    return Response(private_key, content_type='application/octet-stream')
+
+@app.route('/show-users', methods=['GET'])
+def show_users():
+    users = User.query.all()  # Fetch all users from the database
+
+    # Create a list of dictionaries representing each user
+    users_list = []
+    for user in users:
+        user_data = {
+            'id': user.id,
+            'username': user.username,
+            'public_key': user.public_key
+        }
+        users_list.append(user_data)
+
+    # Return the list as a JSON response
+    return jsonify(users_list)
 
 '''
     API request na zasifrovanie suboru pre pouzivatela <user>
@@ -53,11 +82,32 @@ def generate_keypair(user):
 '''
 @app.route('/api/encrypt/<user>', methods=['POST'])
 def encrypt_file(user):
-    '''
-        TODO: implementovat
-    '''
+    user_record = User.query.filter_by(username=user).first()
 
-    return Response(b'\xff', content_type='application/octet-stream')
+    if not user_record:
+        return jsonify({"error": "User not found"}), 404
+
+    if 'file' not in request.files:
+        return jsonify({"error": "No file uploaded"}), 400
+
+    uploaded_file = request.files['file']
+    file_data = uploaded_file.read()  # Read the file's binary content
+
+    # Step 2: Encrypt the entire file using the user's RSA public key
+    public_key = RSA.import_key(user_record.public_key)  # Import user's public key
+    cipher_rsa = PKCS1_OAEP.new(public_key)
+
+    # RSA can only encrypt small chunks of data, so we need to split the file into chunks
+    chunk_size = 214  # RSA with 2048-bit keys can encrypt 214 bytes of data with PKCS1_OAEP padding
+    encrypted_file = b''
+
+    for i in range(0, len(file_data), chunk_size):
+        chunk = file_data[i:i + chunk_size]  # Get a chunk of the file
+        encrypted_chunk = cipher_rsa.encrypt(chunk)  # Encrypt each chunk
+        encrypted_file += encrypted_chunk  # Append encrypted chunk
+
+    # Step 3: Return the encrypted file as a binary response
+    return Response(encrypted_file, content_type='application/octet-stream')
 
 
 '''
@@ -68,14 +118,25 @@ def encrypt_file(user):
 '''
 @app.route('/api/decrypt', methods=['POST'])
 def decrypt_file():
-    '''
-        TODO: implementovat
-    '''
+    if 'file' not in request.files or 'key' not in request.files:
+        return jsonify({"error": "File or private key not provided"}), 400
 
-    file = request.files.get('file')
-    key = request.files.get('key')
+    encrypted_file = request.files['file'].read()  # Read the encrypted file's binary content
+    private_key = RSA.import_key(request.files['key'].read())  # Import user's private key
 
-    return Response(b'\xff', content_type='application/octet-stream')
+    # Step 2: Decrypt the file using the private RSA key
+    cipher_rsa = PKCS1_OAEP.new(private_key)
+    chunk_size = 256  # RSA with 2048-bit keys produces 256-byte encrypted chunks
+
+    decrypted_file = b''
+
+    for i in range(0, len(encrypted_file), chunk_size):
+        encrypted_chunk = encrypted_file[i:i + chunk_size]  # Get an encrypted chunk
+        decrypted_chunk = cipher_rsa.decrypt(encrypted_chunk)  # Decrypt each chunk
+        decrypted_file += decrypted_chunk  # Append decrypted chunk
+
+    # Step 3: Return the decrypted file as a binary response
+    return Response(decrypted_file, content_type='application/octet-stream')
 
 
 '''
