@@ -4,6 +4,60 @@
     <meta charset="UTF-8">
     <title>Register</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <script>
+        function validatePasswordComplexity(password) {
+            let message = "";
+
+            // Minimum length of 8 characters
+            if (password.length < 8) {
+                message += "Password must be at least 8 characters long.\n";
+            }
+
+            // At least one uppercase letter
+            if (!/[A-Z]/.test(password)) {
+                message += "Password must contain at least one uppercase letter.\n";
+            }
+
+            // At least one lowercase letter
+            if (!/[a-z]/.test(password)) {
+                message += "Password must contain at least one lowercase letter.\n";
+            }
+
+            // At least one digit
+            if (!/\d/.test(password)) {
+                message += "Password must contain at least one digit.\n";
+            }
+
+            // At least one special character
+            if (!/[!@#$%^&*(),.?":{}|<>]/.test(password)) {
+                message += "Password must contain at least one special character: !@#$%^&*(),.?\":{}|<>\n";
+            }
+
+            return message;
+        }
+
+        function validateForm(event) {
+            const password = document.getElementById("password").value;
+            const confirmPassword = document.getElementById("confirm_password").value;
+
+            let errorMessage = validatePasswordComplexity(password);
+
+            // Check if passwords match
+            if (password !== confirmPassword) {
+                errorMessage += "Passwords do not match.\n";
+            }
+
+            if (errorMessage) {
+                alert(errorMessage); // You can also display this in the DOM instead of an alert
+                event.preventDefault(); // Prevent form submission if validation fails
+            }
+        }
+
+        document.addEventListener("DOMContentLoaded", function () {
+            const form = document.querySelector("form");
+            form.addEventListener("submit", validateForm);
+        });
+    </script>
 </head>
 <body>
     <div class="container">
@@ -11,12 +65,12 @@
         <form method="POST">
             {{ form.hidden_tag() }}
             <p>{{ form.username.label }} {{ form.username(class_="form-control") }}</p>
-            <p>{{ form.password.label }} {{ form.password(class_="form-control") }}</p>
-            <p>{{ form.confirm_password.label }} {{ form.confirm_password(class_="form-control") }}</p>
-            <p>{{ form.submit(class_="btn btn-primary") }}</p>
+            <p>{{ form.password.label }} <input type="password" id="password" class="form-control" name="password"></p>
+            <p>{{ form.confirm_password.label }} <input type="password" id="confirm_password" class="form-control" name="confirm_password"></p>
+            <p><input type="submit" class="btn btn-primary" value="Register"></p>
         </form>
         <p>Already have an account? <a href="{{ url_for('login') }}">Login here</a></p>
-        
+
         {% for message in get_flashed_messages() %}
             <div class="flash">{{ message }}</div>
         {% endfor %}

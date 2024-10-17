@@ -2,16 +2,26 @@
 <html lang="en">
 <head>
     <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Login</title>
     <link rel="stylesheet" href="{{ url_for('static', filename='styles.css') }}">
+    <!-- Add Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self';">
 </head>
 <body>
     <div class="container">
         <h1>Login</h1>
-        <form method="POST">
-            {{ form.hidden_tag() }}
-            <p>{{ form.username.label }} {{ form.username(class_="form-control") }}</p>
-            <p>{{ form.password.label }} {{ form.password(class_="form-control") }}</p>
+        <form method="POST" action="{{ url_for('login') }}">
+            {{ form.hidden_tag() }}  <!-- CSRF Token -->
+            <p>{{ form.username.label }} {{ form.username(class_="form-control", required=True) }}</p>
+            <p>{{ form.password.label }} {{ form.password(class_="form-control", type="password", required=True) }}</p>
+
+            <!-- Remember Me Option -->
+            <div class="form-check">
+                <input type="checkbox" class="form-check-input" id="remember_me" name="remember_me">
+                <label class="form-check-label" for="remember_me">Remember Me</label>
+            </div>
+
             <p>{{ form.submit(class_="btn btn-primary") }}</p>
         </form>
 
