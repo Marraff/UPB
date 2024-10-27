@@ -202,8 +202,10 @@ def login():
 
         # Check if user is currently locked out
         if attempt and attempt.lockout_time and datetime.utcnow() < attempt.lockout_time:
-            formatted_time = attempt.lockout_time.strftime("%H:%M:%S %d/%m/%Y")
-            flash(f"Too many failed attempts. You can try again at {formatted_time}.", "danger")
+            time_remaining = attempt.lockout_time - datetime.utcnow()
+            minutes = time_remaining.seconds // 60
+            seconds = time_remaining.seconds % 60
+            flash(f"Account is locked due to too many failed attempts. Try again in {minutes} minutes and {seconds} seconds.", "danger")
             return render_template('login.html', form=form)
 
         # Fetch the user from the database by username
@@ -221,24 +223,29 @@ def login():
         # Handle failed login attempt
         if not attempt:
             # Create a new record if it's the first failed attempt
-            attempt = LoginAttempt(username=username)
+            attempt = LoginAttempt(username=username, attempt_count=1, lockout_level=0)
             db.session.add(attempt)
         else:
             # Increment the attempt count
             attempt.attempt_count += 1
-            attempt.last_attempt = datetime.utcnow()
 
-            # Increment lockout level if applicable
-            if attempt.lockout_level < len(TIMEOUT_DURATIONS):
-                attempt.lockout_time = datetime.utcnow() + TIMEOUT_DURATIONS[attempt.lockout_level]
-                attempt.lockout_level += 1  # Move to the next lockout level
-
-                flash(f"Account locked due to too many failed attempts. Try again in {TIMEOUT_DURATIONS[attempt.lockout_level - 1]} minutes.", "danger")
+        # Now check if attempt_count is at multiples of 3
+        if attempt.attempt_count in [3, 6, 9]:
+            lockout_index = (attempt.attempt_count // 3) - 1  # 0-based index
+            if lockout_index < len(TIMEOUT_DURATIONS):
+                attempt.lockout_level = lockout_index + 1  # Levels are 1-based
+                attempt.lockout_time = datetime.utcnow() + TIMEOUT_DURATIONS[lockout_index]
+                db.session.commit()
+                lockout_minutes = TIMEOUT_DURATIONS[lockout_index].seconds // 60
+                flash(f"Account locked due to too many failed attempts. Try again in {lockout_minutes} minutes.", "danger")
+                return render_template('login.html', form=form)
             else:
                 flash("Too many failed attempts. Please contact support.", "danger")
-
-        db.session.commit()
-        flash('Invalid username or password.', 'danger')
+                return render_template('login.html', form=form)
+        else:
+            db.session.commit()
+            flash('Invalid username or password.', 'danger')
+            return render_template('login.html', form=form)
 
     return render_template('login.html', form=form)
 
