@@ -165,7 +165,7 @@ def validate_password_complexity(password):
 
     return True
 
-# uloha 3
+# uloha 4
 COMMON_PASSWORDS_FILE = '1000000-password-seclists.txt'
 
 def load_common_passwords():
@@ -179,7 +179,7 @@ def is_common_password(password):
 
 
 
-# uloha 4
+# uloha 3
 TIMEOUT_DURATIONS = [timedelta(minutes=5), timedelta(minutes=10), timedelta(minutes=30)]
 @app.route('/')
 @login_required
@@ -205,8 +205,11 @@ def login():
             time_remaining = attempt.lockout_time - datetime.utcnow()
             minutes = time_remaining.seconds // 60
             seconds = time_remaining.seconds % 60
-            flash(f"Account is locked due to too many failed attempts. Try again in {minutes} minutes and {seconds} seconds.", "danger")
-            return render_template('login.html', form=form)
+            flash(
+                f"Account is locked due to too many failed attempts. Try again in {minutes} minutes and {seconds} seconds.",
+                "danger",
+            )
+            return render_template("login.html", form=form)
 
         # Fetch the user from the database by username
         user = User.query.filter_by(username=username).first()
@@ -218,7 +221,7 @@ def login():
                 db.session.commit()
 
             login_user(user)
-            return redirect(url_for('home'))
+            return redirect(url_for("home"))
 
         # Handle failed login attempt
         if not attempt:
@@ -229,25 +232,26 @@ def login():
             # Increment the attempt count
             attempt.attempt_count += 1
 
-        # Now check if attempt_count is at multiples of 3
-        if attempt.attempt_count in [3, 6, 9]:
-            lockout_index = (attempt.attempt_count // 3) - 1  # 0-based index
-            if lockout_index < len(TIMEOUT_DURATIONS):
-                attempt.lockout_level = lockout_index + 1  # Levels are 1-based
-                attempt.lockout_time = datetime.utcnow() + TIMEOUT_DURATIONS[lockout_index]
-                db.session.commit()
-                lockout_minutes = TIMEOUT_DURATIONS[lockout_index].seconds // 60
-                flash(f"Account locked due to too many failed attempts. Try again in {lockout_minutes} minutes.", "danger")
-                return render_template('login.html', form=form)
-            else:
-                flash("Too many failed attempts. Please contact support.", "danger")
-                return render_template('login.html', form=form)
+        # Trigger lockout on every 3rd attempt
+        if attempt.attempt_count % 3 == 0:
+            lockout_index = min(
+                (attempt.attempt_count // 3) - 1, len(TIMEOUT_DURATIONS) - 1
+            )
+            attempt.lockout_level = lockout_index + 1  # Levels are 1-based
+            attempt.lockout_time = datetime.utcnow() + TIMEOUT_DURATIONS[lockout_index]
+            db.session.commit()
+            lockout_minutes = TIMEOUT_DURATIONS[lockout_index].seconds // 60
+            flash(
+                f"Account locked due to too many failed attempts. Try again in {lockout_minutes} minutes.",
+                "danger",
+            )
+            return render_template("login.html", form=form)
         else:
             db.session.commit()
-            flash('Invalid username or password.', 'danger')
-            return render_template('login.html', form=form)
+            flash("Invalid username or password.", "danger")
+            return render_template("login.html", form=form)
 
-    return render_template('login.html', form=form)
+    return render_template("login.html", form=form)
 
 
 @app.route('/register', methods=['GET', 'POST'])
