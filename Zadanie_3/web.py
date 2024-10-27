@@ -1,9 +1,10 @@
-from flask import Flask, render_template, redirect, url_for, flash, jsonify
+from flask import Flask, render_template, redirect, url_for, flash, jsonify, request
 from flask_wtf import FlaskForm
 from wtforms import StringField, PasswordField, SubmitField
 from wtforms.validators import InputRequired, EqualTo
 from flask_login import login_required, LoginManager, UserMixin, login_user, logout_user, current_user
 from flask_sqlalchemy import SQLAlchemy
+from datetime import datetime, timedelta
 import re
 import os
 import hashlib
@@ -24,6 +25,8 @@ login_manager.login_view = 'login'
 SALT_LENGTH = 16  # Length of the salt (in bytes)
 ITERATIONS = 100000  # Number of hashing iterations
 
+
+
 '''
     Tabulka pre pouzivatelov:
     - id: jedinecne id pouzivatela
@@ -41,6 +44,19 @@ class User(db.Model, UserMixin):
 
     def __repr__(self):
         return f'<User {self.username}>'
+
+class LoginAttempt(db.Model):
+    __tablename__ = 'login_attempts'
+
+    id = db.Column(db.Integer, primary_key=True)
+    username = db.Column(db.String(150), nullable=True)  # Nullable for failed username attempts
+    attempt_count = db.Column(db.Integer, default=0)
+    lockout_level = db.Column(db.Integer, default=0)
+    last_attempt = db.Column(db.DateTime, default=datetime.utcnow)
+    lockout_time = db.Column(db.DateTime, nullable=True)
+
+    def __repr__(self):
+        return f'<LoginAttempt {self.username}>'
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -69,7 +85,6 @@ class RegisterForm(FlaskForm):
 # bod 2
 
 def generate_salt():
-    #Generate a random salt for each user.
     return os.urandom(SALT_LENGTH)
 
 def hash_password(password, salt):
@@ -150,34 +165,79 @@ def validate_password_complexity(password):
 
     return True
 
+# uloha 3
+COMMON_PASSWORDS_FILE = '1000000-password-seclists.txt'
 
+def load_common_passwords():
+    with open(COMMON_PASSWORDS_FILE, 'r') as f:
+        return set(line.strip() for line in f)
+
+common_passwords = load_common_passwords()
+
+def is_common_password(password):
+    return password in common_passwords
+
+
+
+# uloha 4
+TIMEOUT_DURATIONS = [timedelta(minutes=5), timedelta(minutes=10), timedelta(minutes=30)]
 @app.route('/')
 @login_required
 def home():
     return render_template('home.html', username=current_user.username)
 
+LOCKOUT_THRESHOLD = 3
+LOCKOUT_DURATION = timedelta(minutes=5)  # Duration of lockout in minutes
+
 @app.route('/login', methods=['GET', 'POST'])
 def login():
-    '''
-        User login route.
-    '''
-
     form = LoginForm()
 
     if form.validate_on_submit():
         username = form.username.data
         password = form.password.data
 
+        # Fetch the login attempt record by username
+        attempt = LoginAttempt.query.filter_by(username=username).first()
+
+        # Check if user is currently locked out
+        if attempt and attempt.lockout_time and datetime.utcnow() < attempt.lockout_time:
+            formatted_time = attempt.lockout_time.strftime("%H:%M:%S %d/%m/%Y")
+            flash(f"Too many failed attempts. You can try again at {formatted_time}.", "danger")
+            return render_template('login.html', form=form)
+
         # Fetch the user from the database by username
         user = User.query.filter_by(username=username).first()
 
-        # Check if user exists
         if user and verify_password(user.password, user.salt, password):
-            # If password is correct, log the user in
+            # Reset login attempts and lockout level on successful login
+            if attempt:
+                db.session.delete(attempt)
+                db.session.commit()
+
             login_user(user)
             return redirect(url_for('home'))
 
-        # Flash an error message if the credentials are invalid
+        # Handle failed login attempt
+        if not attempt:
+            # Create a new record if it's the first failed attempt
+            attempt = LoginAttempt(username=username)
+            db.session.add(attempt)
+        else:
+            # Increment the attempt count
+            attempt.attempt_count += 1
+            attempt.last_attempt = datetime.utcnow()
+
+            # Increment lockout level if applicable
+            if attempt.lockout_level < len(TIMEOUT_DURATIONS):
+                attempt.lockout_time = datetime.utcnow() + TIMEOUT_DURATIONS[attempt.lockout_level]
+                attempt.lockout_level += 1  # Move to the next lockout level
+
+                flash(f"Account locked due to too many failed attempts. Try again in {TIMEOUT_DURATIONS[attempt.lockout_level - 1]} minutes.", "danger")
+            else:
+                flash("Too many failed attempts. Please contact support.", "danger")
+
+        db.session.commit()
         flash('Invalid username or password.', 'danger')
 
     return render_template('login.html', form=form)
@@ -185,38 +245,37 @@ def login():
 
 @app.route('/register', methods=['GET', 'POST'])
 def register():
-    '''
-        Register a new user with secure password storage.
-    '''
-
     form = RegisterForm()
 
     if form.validate_on_submit():
         username = form.username.data
         password = form.password.data
-        
+
         # Check if password meets complexity requirements
         if not validate_password_complexity(password):
             return render_template('register.html', form=form)
 
+        # Check if password is publicly known
+        if is_common_password(password):
+            flash("This password was found in leaked passwords database. Please choose a more secure password.", "danger")
+            return render_template('register.html', form=form)
+
         # Generate salt and hash the password
-        salt = generate_salt()  # Generate a new salt for this user
-        hashed_password = hash_password(password, salt)  # Hash the password with the salt
+        salt = generate_salt()
+        hashed_password = hash_password(password, salt)
 
         # Convert salt and hashed password to hex for storage
         salt_hex = salt.hex()
         hashed_password_hex = hashed_password.hex()
 
         # Create a new user with hashed password and salt
-        test_user = User(username=username, password=hashed_password_hex, salt=salt_hex)
-        
+        new_user = User(username=username, password=hashed_password_hex, salt=salt_hex)
+
         # Add the user to the database
-        db.session.add(test_user)
+        db.session.add(new_user)
         db.session.commit()
 
-        # Optionally, flash a success message
         flash('You have successfully registered!', 'success')
-
         return redirect(url_for('login'))
 
     return render_template('register.html', form=form)
@@ -247,4 +306,4 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(port=1337)
+    app.run(port=1338)
