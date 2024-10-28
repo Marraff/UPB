@@ -166,7 +166,7 @@ def validate_password_complexity(password):
     return True
 
 # uloha 3
-COMMON_PASSWORDS_FILE = '1000000-password-seclists.txt'
+COMMON_PASSWORDS_FILE = os.path.join(os.path.dirname(__file__), '1000000-password-seclists.txt')
 
 def load_common_passwords():
     with open(COMMON_PASSWORDS_FILE, 'r') as f:
@@ -299,8 +299,19 @@ def show_users():
             'id': user.id,
             'username': user.username,
             'password': user.password,
-            'salt': user.salt
+            'salt': user.salt,
         }
+
+        # Retrieve login attempt data if it exists
+        login_attempt = LoginAttempt.query.filter_by(username=user.username).first()
+        if login_attempt:
+            user_data.update({
+                'attempt_count': login_attempt.attempt_count,
+                'lockout_level': login_attempt.lockout_level,
+                'last_attempt': login_attempt.last_attempt,
+                'lockout_time': login_attempt.lockout_time
+            })
+
         users_list.append(user_data)
 
     # Return the list as a JSON response
@@ -313,4 +324,4 @@ def logout():
     return redirect(url_for('login'))
 
 if __name__ == '__main__':
-    app.run(port=1338)
+    app.run(port=1337)
