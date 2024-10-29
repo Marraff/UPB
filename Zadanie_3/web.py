@@ -5,6 +5,7 @@ from wtforms.validators import InputRequired, EqualTo
 from flask_login import login_required, LoginManager, UserMixin, login_user, logout_user, current_user
 from flask_sqlalchemy import SQLAlchemy
 from datetime import datetime, timedelta
+import time
 import re
 import os
 import hashlib
@@ -45,18 +46,6 @@ class User(db.Model, UserMixin):
     def __repr__(self):
         return f'<User {self.username}>'
 
-class LoginAttempt(db.Model):
-    __tablename__ = 'login_attempts'
-
-    id = db.Column(db.Integer, primary_key=True)
-    username = db.Column(db.String(150), nullable=True)  # Nullable for failed username attempts
-    attempt_count = db.Column(db.Integer, default=0)
-    lockout_level = db.Column(db.Integer, default=0)
-    last_attempt = db.Column(db.DateTime, default=datetime.utcnow)
-    lockout_time = db.Column(db.DateTime, nullable=True)
-
-    def __repr__(self):
-        return f'<LoginAttempt {self.username}>'
 
 @login_manager.user_loader
 def load_user(user_id):
@@ -166,7 +155,7 @@ def validate_password_complexity(password):
     return True
 
 # uloha 4
-COMMON_PASSWORDS_FILE = '1000000-password-seclists.txt'
+COMMON_PASSWORDS_FILE = os.path.join(os.path.dirname(__file__), '1000000-password-seclists.txt')
 
 def load_common_passwords():
     with open(COMMON_PASSWORDS_FILE, 'r') as f:
@@ -179,79 +168,37 @@ def is_common_password(password):
 
 
 
-# uloha 3
-TIMEOUT_DURATIONS = [timedelta(minutes=5), timedelta(minutes=10), timedelta(minutes=30)]
+
 @app.route('/')
 @login_required
 def home():
     return render_template('home.html', username=current_user.username)
-
-LOCKOUT_THRESHOLD = 3
-LOCKOUT_DURATION = timedelta(minutes=5)  # Duration of lockout in minutes
 
 @app.route('/login', methods=['GET', 'POST'])
 def login():
     form = LoginForm()
 
     if form.validate_on_submit():
+        start_time = time.time()
+
         username = form.username.data
         password = form.password.data
-
-        # Fetch the login attempt record by username
-        attempt = LoginAttempt.query.filter_by(username=username).first()
-
-        # Check if user is currently locked out
-        if attempt and attempt.lockout_time and datetime.utcnow() < attempt.lockout_time:
-            time_remaining = attempt.lockout_time - datetime.utcnow()
-            minutes = time_remaining.seconds // 60
-            seconds = time_remaining.seconds % 60
-            flash(
-                f"Account is locked due to too many failed attempts. Try again in {minutes} minutes and {seconds} seconds.",
-                "danger",
-            )
-            return render_template("login.html", form=form)
-
-        # Fetch the user from the database by username
         user = User.query.filter_by(username=username).first()
-
         if user and verify_password(user.password, user.salt, password):
-            # Reset login attempts and lockout level on successful login
-            if attempt:
-                db.session.delete(attempt)
-                db.session.commit()
-
             login_user(user)
             return redirect(url_for("home"))
-
-        # Handle failed login attempt
-        if not attempt:
-            # Create a new record if it's the first failed attempt
-            attempt = LoginAttempt(username=username, attempt_count=1, lockout_level=0)
-            db.session.add(attempt)
-        else:
-            # Increment the attempt count
-            attempt.attempt_count += 1
-
-        # Trigger lockout on every 3rd attempt
-        if attempt.attempt_count % 3 == 0:
-            lockout_index = min(
-                (attempt.attempt_count // 3) - 1, len(TIMEOUT_DURATIONS) - 1
-            )
-            attempt.lockout_level = lockout_index + 1  # Levels are 1-based
-            attempt.lockout_time = datetime.utcnow() + TIMEOUT_DURATIONS[lockout_index]
-            db.session.commit()
-            lockout_minutes = TIMEOUT_DURATIONS[lockout_index].seconds // 60
-            flash(
-                f"Account locked due to too many failed attempts. Try again in {lockout_minutes} minutes.",
-                "danger",
-            )
-            return render_template("login.html", form=form)
         else:
             db.session.commit()
-            flash("Invalid username or password.", "danger")
-            return render_template("login.html", form=form)
+            flash('Invalid username or password.', 'danger')
+            #Give response back after 1 second from request
+            elapsed_time = time.time() - start_time
+            time.sleep(max(0, 1 - elapsed_time))
+            return render_template('login.html', form=form)
 
-    return render_template("login.html", form=form)
+        # Calculate time taken and sleep for the remaining time to reach 1 second
+
+
+    return render_template('login.html', form=form)
 
 
 @app.route('/register', methods=['GET', 'POST'])
@@ -303,7 +250,7 @@ def show_users():
             'id': user.id,
             'username': user.username,
             'password': user.password,
-            'salt': user.salt
+            'salt': user.salt,
         }
         users_list.append(user_data)
 
